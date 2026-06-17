@@ -2,47 +2,72 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Bike Map Simulator - Free Drive</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #111; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   canvas { display: block; width: 100vw; height: 100vh; background: #111; touch-action: none; }
   .panel {
-    position: fixed; left: 12px; top: 12px; color: #f5f5f5; background: rgba(0,0,0,.68);
-    padding: 12px 14px; border-radius: 10px; line-height: 1.45; font-size: 14px; user-select: none;
-    box-shadow: 0 4px 18px rgba(0,0,0,.38); max-width: min(560px, calc(100vw - 40px));
+    position: fixed; left: max(10px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top));
+    color: #f5f5f5; background: rgba(0,0,0,.66); padding: 10px 12px; border-radius: 12px;
+    line-height: 1.42; font-size: 13px; user-select: none; -webkit-user-select: none;
+    box-shadow: 0 4px 18px rgba(0,0,0,.38); max-width: min(620px, calc(100vw - 28px));
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
   }
   .panel b { font-size: 15px; }
+  .panel.compact .details, .panel.compact #status { display: none; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
-  button { background: #222; color: #fff; border: 1px solid #777; border-radius: 6px; padding: 5px 9px; cursor: pointer; }
+  button {
+    background: rgba(34,34,34,.92); color: #fff; border: 1px solid #777; border-radius: 10px;
+    padding: 8px 12px; cursor: pointer; min-height: 42px; touch-action: none; font-weight: 650;
+  }
   button:hover { background: #333; }
-  button.active { background: #0b5; border-color: #9fd; color: #031; font-weight: 700; }
+  button.active { background: #0b5; border-color: #9fd; color: #031; font-weight: 800; }
   .hint { color: #cfcfcf; font-size: 12px; margin-top: 6px; }
   .warning { color: #ffd27d; font-weight: 700; }
-  .touch {
-    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
-    display: grid; grid-template-columns: 78px 78px; gap: 18px; opacity: .82; user-select: none;
+  .tap-hint {
+    position: fixed; left: 50%; bottom: calc(112px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    color: rgba(255,255,255,.72); background: rgba(0,0,0,.36); border-radius: 999px;
+    padding: 6px 12px; font-size: 12px; pointer-events: none; user-select: none; white-space: nowrap;
   }
-  .touch button { font-size: 28px; border-radius: 14px; background: rgba(20,20,20,.82); height: 68px; }
-  @media (pointer: fine) { .touch { display: none; } }
+  .touch {
+    position: fixed; left: 0; right: 0; bottom: max(12px, env(safe-area-inset-bottom));
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 max(14px, env(safe-area-inset-left)) 0 max(14px, env(safe-area-inset-right));
+    user-select: none; -webkit-user-select: none; pointer-events: none;
+  }
+  .touch button {
+    pointer-events: auto; font-size: 24px; border-radius: 22px; background: rgba(10,10,10,.58);
+    height: 88px; border: 2px solid rgba(255,255,255,.56); box-shadow: 0 5px 20px rgba(0,0,0,.45);
+  }
+  .touch button:active { transform: scale(.98); background: rgba(255,255,255,.20); }
+  @media (pointer: fine) { .touch, .tap-hint { display: none; } }
+  @media (max-width: 640px) {
+    .panel { right: max(10px, env(safe-area-inset-right)); max-width: none; font-size: 12px; }
+    .row { gap: 6px; }
+    button { min-height: 40px; padding: 7px 10px; }
+    .details { display: none; }
+  }
 </style>
 </head>
 <body>
 <canvas id="sim"></canvas>
-<div class="panel">
+<div class="panel compact" id="panel">
   <b>Bike Map Simulator</b><br />
-  バイクは自動前進します。操作は左右のみです。<br />
-  A / ←: 左へ曲がる　D / →: 右へ曲がる<br />
-  R: スタート位置へ戻る　+ / -: ズーム
+  <span class="details">バイクは自動前進します。操作は左右のみです。<br />A / ←: 左へ曲がる　D / →: 右へ曲がる<br />R: スタートへ戻る　+ / -: ズーム</span>
   <div class="row">
-    <button id="setStartBtn">スタート位置を指定</button>
-    <button id="resetBtn">スタートへ戻る</button>
+    <button id="setStartBtn">スタート指定</button>
+    <button id="resetBtn">戻る</button>
+    <button id="pauseBtn">一時停止</button>
+    <button id="zoomOutBtn">−</button>
+    <button id="zoomInBtn">＋</button>
+    <button id="compactBtn">表示</button>
   </div>
-  <div class="hint" id="modeHint">進行方向は常に画面上です。マップ側が移動・回転します。通行不可領域はありません。</div>
+  <div class="hint" id="modeHint">スマホでは画面左半分を押すと左、右半分を押すと右へ曲がります。</div>
   <div class="hint" id="status">loading...</div>
 </div>
+<div class="tap-hint">画面左半分: 左へ曲がる　/　右半分: 右へ曲がる</div>
 <div class="touch" aria-label="touch controls">
-  <button id="left">◀</button><button id="right">▶</button>
+  <button id="left">← 左</button><button id="right">右 →</button>
 </div>
 <script>
 (() => {
@@ -53,10 +78,15 @@
 
   const canvas = document.getElementById('sim');
   const ctx = canvas.getContext('2d');
+  const panel = document.getElementById('panel');
   const status = document.getElementById('status');
   const modeHint = document.getElementById('modeHint');
   const setStartBtn = document.getElementById('setStartBtn');
   const resetBtn = document.getElementById('resetBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const zoomOutBtn = document.getElementById('zoomOutBtn');
+  const zoomInBtn = document.getElementById('zoomInBtn');
+  const compactBtn = document.getElementById('compactBtn');
 
   const keys = Object.create(null);
   const mapImg = new Image();
@@ -80,6 +110,8 @@
   let startMode = false;
   let pendingStart = null;
   let draggingStart = false;
+  let paused = false;
+  let steerPointerId = null;
 
   function resize() {
     dpr = window.devicePixelRatio || 1;
@@ -133,7 +165,7 @@
   }
 
   function update(dt) {
-    if (startMode) {
+    if (startMode || paused) {
       bike.speed = 0;
       return;
     }
@@ -280,12 +312,13 @@
   function drawHUD() {
     const kmh = Math.abs(bike.speed) * PX_TO_M * 3.6;
     let text = `速度: ${kmh.toFixed(1)} km/h　位置: (${bike.x.toFixed(0)}, ${bike.y.toFixed(0)})　スタート: (${start.x.toFixed(0)}, ${start.y.toFixed(0)})　ズーム: ${zoom.toFixed(2)}x`;
+    if (paused) text += '　<span class="warning">一時停止中</span>';
     if (nowMs() < flashUntil) text += `　<span class="warning">${flashMessage}</span>`;
     status.innerHTML = text;
     if (startMode) {
-      modeHint.innerHTML = 'スタート指定中: <b>マップ内でドラッグ</b>してください。押した位置がスタート、ドラッグ方向が向きになります。Escでキャンセル。';
+      modeHint.innerHTML = 'スタート指定中: <b>マップ内でドラッグ</b>してください。押した位置がスタート、ドラッグ方向が向きになります。';
     } else {
-      modeHint.innerHTML = '進行方向は常に画面上です。マップ側が移動・回転します。通行不可領域はありません。';
+      modeHint.innerHTML = 'スマホ: 画面左半分を押すと左、右半分を押すと右へ曲がります。バイクは常に画面上方向へ進みます。';
     }
   }
 
@@ -310,12 +343,25 @@
   }
   requestAnimationFrame(loop);
 
+  function clearTouchSteer() {
+    keys.touch_left = false;
+    keys.touch_right = false;
+    steerPointerId = null;
+  }
+
+  function setTouchSteerFromX(clientX) {
+    const leftSide = clientX < innerWidth * 0.5;
+    keys.touch_left = leftSide;
+    keys.touch_right = !leftSide;
+  }
+
   function setStartMode(on) {
     startMode = on;
     pendingStart = null;
     draggingStart = false;
+    clearTouchSteer();
     setStartBtn.classList.toggle('active', startMode);
-    setStartBtn.textContent = startMode ? '指定をキャンセル' : 'スタート位置を指定';
+    setStartBtn.textContent = startMode ? 'キャンセル' : 'スタート指定';
     if (startMode) bike.speed = 0;
   }
 
@@ -334,7 +380,15 @@
   }
 
   canvas.addEventListener('pointerdown', (ev) => {
-    if (!startMode) return;
+    if (!startMode) {
+      if (ev.pointerType !== 'mouse') {
+        ev.preventDefault();
+        steerPointerId = ev.pointerId;
+        setTouchSteerFromX(ev.clientX);
+        try { canvas.setPointerCapture(ev.pointerId); } catch (_) {}
+      }
+      return;
+    }
     ev.preventDefault();
     const p = screenToMap(ev.clientX, ev.clientY);
     const heading = bike.heading;
@@ -348,6 +402,11 @@
   });
 
   canvas.addEventListener('pointermove', (ev) => {
+    if (!startMode && steerPointerId === ev.pointerId) {
+      ev.preventDefault();
+      setTouchSteerFromX(ev.clientX);
+      return;
+    }
     if (!startMode || !draggingStart || !pendingStart) return;
     ev.preventDefault();
     const p = screenToMap(ev.clientX, ev.clientY);
@@ -356,35 +415,60 @@
     if (Math.hypot(dx, dy) > 4) pendingStart.heading = Math.atan2(dy, dx);
   });
 
-  canvas.addEventListener('pointerup', (ev) => {
+  function endPointer(ev) {
+    if (!startMode && steerPointerId === ev.pointerId) {
+      ev.preventDefault();
+      clearTouchSteer();
+      try { canvas.releasePointerCapture(ev.pointerId); } catch (_) {}
+      return;
+    }
     if (!startMode || !draggingStart) return;
     ev.preventDefault();
     draggingStart = false;
     try { canvas.releasePointerCapture(ev.pointerId); } catch (_) {}
     finalizeStart();
-  });
+  }
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
 
   addEventListener('keydown', (ev) => {
     const k = ev.key.toLowerCase();
     keys[k] = true;
     if (k === 'r') resetBike();
+    if (k === ' ' || k === 'p') {
+      paused = !paused;
+      pauseBtn.textContent = paused ? '再開' : '一時停止';
+    }
     if (k === '+' || k === '=') zoom = clamp(zoom + 0.12, 0.8, 4.0);
     if (k === '-' || k === '_') zoom = clamp(zoom - 0.12, 0.8, 4.0);
     if (ev.key === 'Escape' && startMode) setStartMode(false);
   });
   addEventListener('keyup', (ev) => { keys[ev.key.toLowerCase()] = false; });
+  addEventListener('contextmenu', (ev) => ev.preventDefault());
+  addEventListener('touchmove', (ev) => ev.preventDefault(), { passive: false });
 
   resetBtn.addEventListener('click', resetBike);
   setStartBtn.addEventListener('click', () => setStartMode(!startMode));
+  pauseBtn.addEventListener('click', () => {
+    paused = !paused;
+    pauseBtn.textContent = paused ? '再開' : '一時停止';
+    clearTouchSteer();
+  });
+  zoomOutBtn.addEventListener('click', () => { zoom = clamp(zoom - 0.12, 0.8, 4.0); });
+  zoomInBtn.addEventListener('click', () => { zoom = clamp(zoom + 0.12, 0.8, 4.0); });
+  compactBtn.addEventListener('click', () => {
+    panel.classList.toggle('compact');
+    compactBtn.textContent = panel.classList.contains('compact') ? '表示' : '隠す';
+  });
 
   function bindTouch(id, key) {
     const el = document.getElementById(id);
-    const down = (e) => { e.preventDefault(); keys[key] = true; };
-    const up = (e) => { e.preventDefault(); keys[key] = false; };
+    const down = (e) => { e.preventDefault(); keys[key] = true; try { el.setPointerCapture(e.pointerId); } catch (_) {} };
+    const up = (e) => { e.preventDefault(); keys[key] = false; try { el.releasePointerCapture(e.pointerId); } catch (_) {} };
     el.addEventListener('pointerdown', down);
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
-    el.addEventListener('pointerleave', up);
+    el.addEventListener('lostpointercapture', up);
   }
   bindTouch('left', 'touch_left');
   bindTouch('right', 'touch_right');
