@@ -57,6 +57,8 @@
   <div class="row">
     <button id="setStartBtn">スタート指定</button>
     <button id="resetBtn">戻る</button>
+    <button id="rewindBtn">巻き戻し</button>
+    <button id="moveBikeBtn">バイク移動</button>
     <button id="pauseBtn">一時停止</button>
     <button id="zoomOutBtn">−</button>
     <button id="zoomInBtn">＋</button>
@@ -83,6 +85,8 @@
   const modeHint = document.getElementById('modeHint');
   const setStartBtn = document.getElementById('setStartBtn');
   const resetBtn = document.getElementById('resetBtn');
+  const rewindBtn = document.getElementById('rewindBtn');
+  const moveBikeBtn = document.getElementById('moveBikeBtn');
   const pauseBtn = document.getElementById('pauseBtn');
   const zoomOutBtn = document.getElementById('zoomOutBtn');
   const zoomInBtn = document.getElementById('zoomInBtn');
@@ -110,8 +114,18 @@
   let startMode = false;
   let pendingStart = null;
   let draggingStart = false;
+  let moveBikeMode = false;
+  let draggingBike = false;
+  let bikeDragPointerId = null;
+  let lastBikeDragPoint = null;
   let paused = false;
+  let rewinding = false;
+  let rewindAccumulator = 0;
   let steerPointerId = null;
+  const history = [];
+  let historyAccumulator = 0;
+  const HISTORY_INTERVAL = 0.05;
+  const HISTORY_MAX = 900;
 
   function resize() {
     dpr = window.devicePixelRatio || 1;
@@ -135,6 +149,43 @@
   function flash(text) { flashMessage = text; flashUntil = nowMs() + 1800; }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function input(name) { return !!keys[name]; }
+
+  function pushHistory(dt) {
+    historyAccumulator += dt;
+    if (historyAccumulator < HISTORY_INTERVAL) return;
+    historyAccumulator = 0;
+    history.push({ x: bike.x, y: bike.y, heading: bike.heading });
+    if (history.length > HISTORY_MAX) history.shift();
+  }
+
+  function clearHistory() {
+    history.length = 0;
+    historyAccumulator = 0;
+    rewindAccumulator = 0;
+  }
+
+  function applyState(st) {
+    bike.x = st.x;
+    bike.y = st.y;
+    bike.heading = st.heading;
+    bike.speed = 0;
+  }
+
+  function rewindStep(dt) {
+    bike.speed = 0;
+    rewindAccumulator += dt;
+    const stepInterval = 0.035;
+    while (rewindAccumulator >= stepInterval && history.length > 0) {
+      const st = history.pop();
+      applyState(st);
+      rewindAccumulator -= stepInterval;
+    }
+    if (history.length === 0) {
+      rewinding = false;
+      rewindBtn.classList.remove('active');
+      flash('これ以上巻き戻せません');
+    }
+  }
 
   function isAsphalt(x, y) {
     if (!mapReady) return true;
@@ -162,13 +213,20 @@
     bike.y = start.y;
     bike.heading = start.heading;
     bike.speed = 0;
+    clearHistory();
   }
 
   function update(dt) {
-    if (startMode || paused) {
+    if (rewinding) {
+      rewindStep(dt);
+      return;
+    }
+    if (startMode || moveBikeMode || paused) {
       bike.speed = 0;
       return;
     }
+
+    pushHistory(dt);
 
     const left = input('a') || input('arrowleft') || input('touch_left');
     const right = input('d') || input('arrowright') || input('touch_right');
@@ -313,12 +371,16 @@
     const kmh = Math.abs(bike.speed) * PX_TO_M * 3.6;
     let text = `速度: ${kmh.toFixed(1)} km/h　位置: (${bike.x.toFixed(0)}, ${bike.y.toFixed(0)})　スタート: (${start.x.toFixed(0)}, ${start.y.toFixed(0)})　ズーム: ${zoom.toFixed(2)}x`;
     if (paused) text += '　<span class="warning">一時停止中</span>';
+    if (rewinding) text += '　<span class="warning">巻き戻し中</span>';
+    if (moveBikeMode) text += '　<span class="warning">バイク移動中</span>';
     if (nowMs() < flashUntil) text += `　<span class="warning">${flashMessage}</span>`;
     status.innerHTML = text;
     if (startMode) {
       modeHint.innerHTML = 'スタート指定中: <b>マップ内でドラッグ</b>してください。押した位置がスタート、ドラッグ方向が向きになります。';
+    } else if (moveBikeMode) {
+      modeHint.innerHTML = 'バイク移動中: <b>画面上でドラッグ</b>するとバイクを移動できます。ドラッグ方向が向きになります。';
     } else {
-      modeHint.innerHTML = 'スマホ: 画面左半分を押すと左、右半分を押すと右へ曲がります。バイクは常に画面上方向へ進みます。';
+      modeHint.innerHTML = 'スマホ: 画面左半分を押すと左、右半分を押すと右へ曲がります。巻き戻しはボタン長押しです。';
     }
   }
 
@@ -356,6 +418,7 @@
   }
 
   function setStartMode(on) {
+    if (on) setBikeMoveMode(false);
     startMode = on;
     pendingStart = null;
     draggingStart = false;
@@ -363,6 +426,21 @@
     setStartBtn.classList.toggle('active', startMode);
     setStartBtn.textContent = startMode ? 'キャンセル' : 'スタート指定';
     if (startMode) bike.speed = 0;
+  }
+
+  function setBikeMoveMode(on) {
+    if (on) setStartMode(false);
+    moveBikeMode = on;
+    draggingBike = false;
+    bikeDragPointerId = null;
+    lastBikeDragPoint = null;
+    clearTouchSteer();
+    moveBikeBtn.classList.toggle('active', moveBikeMode);
+    moveBikeBtn.textContent = moveBikeMode ? '移動終了' : 'バイク移動';
+    if (moveBikeMode) {
+      bike.speed = 0;
+      flash('バイクをドラッグして移動できます');
+    }
   }
 
   function finalizeStart() {
@@ -379,7 +457,33 @@
     flash('スタート位置を更新しました');
   }
 
+
+  function moveBikeToPointer(ev) {
+    const p = screenToMap(ev.clientX, ev.clientY);
+    const x = clamp(p.x, 0, mapImg.width || 555);
+    const y = clamp(p.y, 0, mapImg.height || 434);
+    if (lastBikeDragPoint) {
+      const dx = x - lastBikeDragPoint.x;
+      const dy = y - lastBikeDragPoint.y;
+      if (Math.hypot(dx, dy) > 2) bike.heading = Math.atan2(dy, dx);
+    }
+    bike.x = x;
+    bike.y = y;
+    bike.speed = 0;
+    lastBikeDragPoint = { x, y };
+  }
+
   canvas.addEventListener('pointerdown', (ev) => {
+    if (moveBikeMode) {
+      ev.preventDefault();
+      draggingBike = true;
+      bikeDragPointerId = ev.pointerId;
+      lastBikeDragPoint = null;
+      clearHistory();
+      moveBikeToPointer(ev);
+      try { canvas.setPointerCapture(ev.pointerId); } catch (_) {}
+      return;
+    }
     if (!startMode) {
       if (ev.pointerType !== 'mouse') {
         ev.preventDefault();
@@ -402,6 +506,11 @@
   });
 
   canvas.addEventListener('pointermove', (ev) => {
+    if (moveBikeMode && draggingBike && bikeDragPointerId === ev.pointerId) {
+      ev.preventDefault();
+      moveBikeToPointer(ev);
+      return;
+    }
     if (!startMode && steerPointerId === ev.pointerId) {
       ev.preventDefault();
       setTouchSteerFromX(ev.clientX);
@@ -416,6 +525,15 @@
   });
 
   function endPointer(ev) {
+    if (moveBikeMode && draggingBike && bikeDragPointerId === ev.pointerId) {
+      ev.preventDefault();
+      draggingBike = false;
+      bikeDragPointerId = null;
+      lastBikeDragPoint = null;
+      try { canvas.releasePointerCapture(ev.pointerId); } catch (_) {}
+      flash('バイク位置を移動しました');
+      return;
+    }
     if (!startMode && steerPointerId === ev.pointerId) {
       ev.preventDefault();
       clearTouchSteer();
@@ -434,6 +552,8 @@
   addEventListener('keydown', (ev) => {
     const k = ev.key.toLowerCase();
     keys[k] = true;
+    if (k === 'z' || k === 'backspace') { rewinding = true; rewindBtn.classList.add('active'); }
+    if (k === 'b') setBikeMoveMode(!moveBikeMode);
     if (k === 'r') resetBike();
     if (k === ' ' || k === 'p') {
       paused = !paused;
@@ -442,13 +562,43 @@
     if (k === '+' || k === '=') zoom = clamp(zoom + 0.12, 0.8, 4.0);
     if (k === '-' || k === '_') zoom = clamp(zoom - 0.12, 0.8, 4.0);
     if (ev.key === 'Escape' && startMode) setStartMode(false);
+    if (ev.key === 'Escape' && moveBikeMode) setBikeMoveMode(false);
   });
-  addEventListener('keyup', (ev) => { keys[ev.key.toLowerCase()] = false; });
+  addEventListener('keyup', (ev) => {
+    const k = ev.key.toLowerCase();
+    keys[k] = false;
+    if (k === 'z' || k === 'backspace') { rewinding = false; rewindBtn.classList.remove('active'); }
+  });
   addEventListener('contextmenu', (ev) => ev.preventDefault());
   addEventListener('touchmove', (ev) => ev.preventDefault(), { passive: false });
 
   resetBtn.addEventListener('click', resetBike);
   setStartBtn.addEventListener('click', () => setStartMode(!startMode));
+  moveBikeBtn.addEventListener('click', () => setBikeMoveMode(!moveBikeMode));
+
+  function startRewindButton(e) {
+    e.preventDefault();
+    if (history.length === 0) {
+      flash('巻き戻し履歴がありません');
+      return;
+    }
+    setStartMode(false);
+    setBikeMoveMode(false);
+    clearTouchSteer();
+    rewinding = true;
+    rewindBtn.classList.add('active');
+    try { rewindBtn.setPointerCapture(e.pointerId); } catch (_) {}
+  }
+  function stopRewindButton(e) {
+    e.preventDefault();
+    rewinding = false;
+    rewindBtn.classList.remove('active');
+    try { rewindBtn.releasePointerCapture(e.pointerId); } catch (_) {}
+  }
+  rewindBtn.addEventListener('pointerdown', startRewindButton);
+  rewindBtn.addEventListener('pointerup', stopRewindButton);
+  rewindBtn.addEventListener('pointercancel', stopRewindButton);
+  rewindBtn.addEventListener('lostpointercapture', () => { rewinding = false; rewindBtn.classList.remove('active'); });
   pauseBtn.addEventListener('click', () => {
     paused = !paused;
     pauseBtn.textContent = paused ? '再開' : '一時停止';
